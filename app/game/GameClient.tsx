@@ -107,13 +107,12 @@ export default function GameClient() {
 
   const [used5050A, setUsed5050A] = useState(false);
   const [used5050B, setUsed5050B] = useState(false);
-  // ✅ x2 power (μία φορά ανά ομάδα)
-const [usedX2A, setUsedX2A] = useState(false);
-const [usedX2B, setUsedX2B] = useState(false);
 
-// ✅ αν είναι ενεργό το x2 για το ΤΡΕΧΟΝ γύρο (μέχρι να απαντηθεί μια ερώτηση)
-const [x2Armed, setX2Armed] = useState(false);
+  const [usedX2A, setUsedX2A] = useState(false);
+  const [usedX2B, setUsedX2B] = useState(false);
 
+  const [x2Armed, setX2Armed] = useState(false);
+  const [x2Active, setX2Active] = useState(false);
 
   const [usedQuestionIds, setUsedQuestionIds] = useState<Set<string>>(() => new Set());
   const [usedCells, setUsedCells] = useState<Set<string>>(() => new Set());
@@ -142,10 +141,12 @@ const [x2Armed, setX2Armed] = useState(false);
   function cellKey(category: Category, points: 1 | 2 | 3, idx: number) {
     return `${category}-${points}-${idx}`;
   }
+
   function nextTurn() {
-  setTurn((t) => (t === "A" ? "B" : "A"));
-  setX2Armed(false); // ✅ reset πάντα όταν αλλάζει σειρά
-}
+    setTurn((t) => (t === "A" ? "B" : "A"));
+    setX2Armed(false);
+    setX2Active(false);
+  }
 
   function award(points: number) {
     if (turn === "A") setScoreA((s) => s + points);
@@ -177,11 +178,9 @@ const [x2Armed, setX2Armed] = useState(false);
 
     setResult({ isCorrect: wonPoints > 0, correct: finalCorrectText });
     setQuestionsPlayed((n) => n + 1);
-    // x2 reset πάντα μετά τον γύρο
-setX2Armed(false);
 
-
-
+    setX2Armed(false);
+    setX2Active(false);
   }
 
   function closeModal() {
@@ -196,8 +195,9 @@ setX2Armed(false);
     setTop5Strikes(0);
     setTop5Message(null);
     setTop5AllowStop(false);
-    setX2Armed(false);
 
+    setX2Armed(false);
+    setX2Active(false);
   }
 
   function onPick(category: Category, points: 1 | 2 | 3, idx: number) {
@@ -211,12 +211,20 @@ setX2Armed(false);
     setHintOptions(null);
     setActiveCell({ category, points, idx });
 
+    if (x2Armed) {
+      setX2Active(true);
+      if (turn === "A") setUsedX2A(true);
+      else setUsedX2B(true);
+      setX2Armed(false);
+    } else {
+      setX2Active(false);
+    }
+
     if (q.kind === "top5") {
       setTop5Found([false, false, false, false, false]);
       setTop5Strikes(0);
       setTop5Message(null);
       setTop5AllowStop(false);
-      setX2Armed(false);
     }
   }
 
@@ -239,14 +247,15 @@ setX2Armed(false);
     else setUsed5050B(true);
   }
 
-function top5StopAndTake1() {
-  const mult = x2Armed ? 2 : 1;
-  finalizeRound(1 * mult, `Σταμάτησες στο 4/5 και πήρες ${1 * mult} πόντους.`);
-}
+  function top5StopAndTake() {
+    finalizeRound(x2Active ? 2 : 1, `Σταμάτησες στο 4/5 και πήρες ${x2Active ? 2 : 1} πόντους.`);
+  }
 
   function top5Continue() {
     setTop5AllowStop(false);
-    setTop5Message(`Συνεχίζεις για τους ${activePoints} πόντους!`);
+    setTop5Message(
+      `Συνεχίζεις για τους ${x2Active ? activePoints * 2 : activePoints} πόντους!`
+    );
   }
 
   function submitAnswer() {
@@ -266,23 +275,21 @@ function top5StopAndTake1() {
       });
 
       if (matchPos !== -1) {
-  const nextFound = [...top5Found];
-  nextFound[matchPos] = true;
-  setTop5Found(nextFound);
+        const nextFound = [...top5Found];
+        nextFound[matchPos] = true;
+        setTop5Found(nextFound);
 
-  const foundCount = nextFound.filter(Boolean).length;
-  setTop5Message(`✅ Σωστό! (${foundCount}/5)`);
-  setUserAnswer("");
+        const foundCount = nextFound.filter(Boolean).length;
+        setTop5Message(`✅ Σωστό! (${foundCount}/5)`);
+        setUserAnswer("");
 
-  // ✅ ΜΟΝΟ αν βρήκε και τις 5 τελειώνει
-  if (foundCount === 5) {
-    const mult = x2Armed ? 2 : 1;
-    return finalizeRound(activePoints * mult, "Βρήκες και τις 5!");
-  }
+        if (foundCount === 5) {
+          return finalizeRound(x2Active ? activePoints * 2 : activePoints, "Βρήκες και τις 5!");
+        }
 
-  if (foundCount >= 4 && top5Strikes < 2) setTop5AllowStop(true);
-  return;
-}
+        if (foundCount >= 4 && top5Strikes < 2) setTop5AllowStop(true);
+        return;
+      }
 
       const nextStrikes = top5Strikes + 1;
       setTop5Strikes(nextStrikes);
@@ -298,8 +305,8 @@ function top5StopAndTake1() {
     const accepted = [correctText, ...(activeQuestion.acceptedAnswers ?? [])];
     const isCorrect = accepted.some((a) => answersMatch(userAnswer, a));
     const base = isCorrect ? activePoints : 0;
-const mult = base > 0 && x2Armed ? 2 : 1;
-finalizeRound(base * mult, correctText);
+    const mult = base > 0 && x2Active ? 2 : 1;
+    finalizeRound(base * mult, correctText);
   }
 
   function continueAfterResult() {
@@ -313,12 +320,14 @@ finalizeRound(base * mult, correctText);
     setFlipResult(null);
     setFlipWinner(null);
   }
+
   function flipCoin() {
     if (!teamASide) return;
     const r: "heads" | "tails" = Math.random() < 0.5 ? "heads" : "tails";
     setFlipResult(r);
     setFlipWinner(r === teamASide ? "A" : "B");
   }
+
   function chooseStarter(choice: "winner" | "other") {
     if (!flipWinner) return;
     const starter = choice === "winner" ? flipWinner : flipWinner === "A" ? "B" : "A";
@@ -326,9 +335,12 @@ finalizeRound(base * mult, correctText);
     setPhase("game");
   }
 
-    if (phase === "coin") {
-    const teamBSide: "heads" | "tails" | null =
-      teamASide ? (teamASide === "heads" ? "tails" : "heads") : null;
+  if (phase === "coin") {
+    const teamBSide: "heads" | "tails" | null = teamASide
+      ? teamASide === "heads"
+        ? "tails"
+        : "heads"
+      : null;
 
     return (
       <main className="min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white p-6 flex items-center justify-center">
@@ -339,7 +351,6 @@ finalizeRound(base * mult, correctText);
             {teamA} διαλέγει πλευρά. Μετά γίνεται flip και ο νικητής διαλέγει ποιος ξεκινάει.
           </div>
 
-          {/* Επιλογή πλευράς */}
           <div className="flex gap-3 mb-3">
             <button
               onClick={() => setSideA("heads")}
@@ -366,25 +377,19 @@ finalizeRound(base * mult, correctText);
             </button>
           </div>
 
-          {/* Δείχνει τι διάλεξε ο καθένας */}
           {teamASide && teamBSide && (
             <div className="mb-4 text-sm text-gray-200 space-y-1">
               <div>
                 <span className="text-gray-400">{teamA}:</span>{" "}
-                <span className="font-semibold">
-                  {teamASide === "heads" ? "Heads" : "Tails"}
-                </span>
+                <span className="font-semibold">{teamASide === "heads" ? "Heads" : "Tails"}</span>
               </div>
               <div>
                 <span className="text-gray-400">{teamB}:</span>{" "}
-                <span className="font-semibold">
-                  {teamBSide === "heads" ? "Heads" : "Tails"}
-                </span>
+                <span className="font-semibold">{teamBSide === "heads" ? "Heads" : "Tails"}</span>
               </div>
             </div>
           )}
 
-          {/* Flip */}
           <button
             onClick={flipCoin}
             disabled={!teamASide || !!flipResult}
@@ -393,25 +398,18 @@ finalizeRound(base * mult, correctText);
             Flip Coin
           </button>
 
-          {/* Αποτέλεσμα flip + νικητής */}
           {flipResult && flipWinner && (
             <div className="mt-4 p-3 rounded-xl bg-white/5 border border-white/10 text-sm text-gray-200 space-y-1">
               <div>
                 🪙 Έφερε:{" "}
-                <span className="font-semibold">
-                  {flipResult === "heads" ? "Heads" : "Tails"}
-                </span>
+                <span className="font-semibold">{flipResult === "heads" ? "Heads" : "Tails"}</span>
               </div>
               <div>
-                🏆 Νικητής:{" "}
-                <span className="font-semibold">
-                  {flipWinner === "A" ? teamA : teamB}
-                </span>
+                🏆 Νικητής: <span className="font-semibold">{flipWinner === "A" ? teamA : teamB}</span>
               </div>
             </div>
           )}
 
-          {/* Επιλογή ποιος ξεκινάει (μόνο μετά το flip) */}
           {flipResult && flipWinner && (
             <div className="mt-4 flex gap-3">
               <button
@@ -433,11 +431,8 @@ finalizeRound(base * mult, correctText);
     );
   }
 
-
-
-return (
+  return (
     <main className="min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white p-6">
-      {/* Header */}
       <div className="flex items-center justify-between gap-4">
         <div className="text-2xl font-bold">
           {sport === "football" ? "⚽ Football Quizball" : "🏀 Basketball Quizball"}
@@ -448,62 +443,54 @@ return (
             <span className="text-gray-300">{teamA}:</span>{" "}
             <span className="font-bold">{scoreA}</span>{" "}
             <span className="text-sm text-gray-400 flex items-center gap-2">
-  (50/50: {used5050A ? "used" : "ready"} • x2: {usedX2A ? "used" : "ready"})
-  <button
-   onClick={() => {
-  if (turn !== "A") return;
-  if (usedX2A) return;
-  if (!!activeQuestion) return; // μόνο πριν ανοίξει ερώτηση
-
-  setX2Armed(true);   // οπλίζει για την επόμενη ερώτηση
-  setUsedX2A(true);   // ✅ ΚΑΙΓΕΤΑΙ ΑΜΕΣΩΣ
-}}
-
-    disabled={turn !== "A" || usedX2A || !!activeQuestion} 
-    className={[
-      "px-2 py-1 rounded-lg border text-xs font-semibold transition",
-      x2Armed && turn === "A"
-        ? "bg-yellow-500/20 border-yellow-400/40"
-        : "bg-white/5 border-white/10 hover:bg-white/10",
-      (turn !== "A" || usedX2A || !!activeQuestion) ? "opacity-40 cursor-not-allowed" : ""
-    ].join(" ")}
-    title="Χρησιμοποίησε x2 πριν διαλέξεις ερώτηση"
-  >
-    x2
-  </button>
-</span>
-
+              (50/50: {used5050A ? "used" : "ready"} • x2: {usedX2A ? "used" : "ready"})
+              <button
+                onClick={() => {
+                  if (turn !== "A") return;
+                  if (usedX2A) return;
+                  if (!!activeQuestion) return;
+                  setX2Armed(true);
+                }}
+                disabled={turn !== "A" || usedX2A || !!activeQuestion}
+                className={[
+                  "px-2 py-1 rounded-lg border text-xs font-semibold transition",
+                  x2Armed && turn === "A"
+                    ? "bg-yellow-500/20 border-yellow-400/40"
+                    : "bg-white/5 border-white/10 hover:bg-white/10",
+                  turn !== "A" || usedX2A || !!activeQuestion ? "opacity-40 cursor-not-allowed" : "",
+                ].join(" ")}
+                title="Χρησιμοποίησε x2 πριν διαλέξεις ερώτηση"
+              >
+                x2
+              </button>
+            </span>
           </div>
 
           <div>
             <span className="text-gray-300">{teamB}:</span>{" "}
             <span className="font-bold">{scoreB}</span>{" "}
             <span className="text-sm text-gray-400 flex items-center gap-2">
-  (50/50: {used5050B ? "used" : "ready"} • x2: {usedX2B ? "used" : "ready"})
-  <button
-    onClick={() => {
-  if (turn !== "B") return;
-  if (usedX2B) return;
-  if (!!activeQuestion) return;
-
-  setX2Armed(true);
-  setUsedX2B(true);
-}}
-
-    disabled={turn !== "B" || usedX2B || !!activeQuestion}
-    className={[
-      "px-2 py-1 rounded-lg border text-xs font-semibold transition",
-      x2Armed && turn === "B"
-        ? "bg-yellow-500/20 border-yellow-400/40"
-        : "bg-white/5 border-white/10 hover:bg-white/10",
-      (turn !== "B" || usedX2B || !!activeQuestion) ? "opacity-40 cursor-not-allowed" : ""
-    ].join(" ")}
-    title="Χρησιμοποίησε x2 πριν διαλέξεις ερώτηση"
-  >
-    x2
-  </button>
-</span>
-
+              (50/50: {used5050B ? "used" : "ready"} • x2: {usedX2B ? "used" : "ready"})
+              <button
+                onClick={() => {
+                  if (turn !== "B") return;
+                  if (usedX2B) return;
+                  if (!!activeQuestion) return;
+                  setX2Armed(true);
+                }}
+                disabled={turn !== "B" || usedX2B || !!activeQuestion}
+                className={[
+                  "px-2 py-1 rounded-lg border text-xs font-semibold transition",
+                  x2Armed && turn === "B"
+                    ? "bg-yellow-500/20 border-yellow-400/40"
+                    : "bg-white/5 border-white/10 hover:bg-white/10",
+                  turn !== "B" || usedX2B || !!activeQuestion ? "opacity-40 cursor-not-allowed" : "",
+                ].join(" ")}
+                title="Χρησιμοποίησε x2 πριν διαλέξεις ερώτηση"
+              >
+                x2
+              </button>
+            </span>
           </div>
 
           <div>
@@ -517,7 +504,6 @@ return (
         </div>
       </div>
 
-      {/* Board */}
       <div className="mt-8 grid grid-cols-4 gap-4">
         <div className="col-span-1 text-gray-300 font-semibold">Κατηγορίες</div>
 
@@ -528,16 +514,12 @@ return (
         {categories.map((cat) => {
           const layout = BOARD_LAYOUT[cat] ?? [1, 2, 3];
           const missing = 3 - layout.length;
-
-          // PhotoQuiz (2 κουμπιά) -> βάζουμε 1 κενό αριστερά για να πάει λίγο δεξιά/κέντρο
           const leftPads = missing;
           const rightPads = 0;
 
           return (
             <div key={cat} className="contents">
-              <div className="p-4 rounded-xl bg-white/5 border border-white/10">
-                {cat}
-              </div>
+              <div className="p-4 rounded-xl bg-white/5 border border-white/10">{cat}</div>
 
               {Array.from({ length: leftPads }).map((_, i) => (
                 <div key={`ph-left-${cat}-${i}`} />
@@ -572,7 +554,6 @@ return (
         })}
       </div>
 
-      {/* Modal */}
       {activeQuestion && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center p-6">
           <div className="w-full max-w-2xl bg-zinc-900 border border-white/10 rounded-2xl p-6">
@@ -582,13 +563,11 @@ return (
                   {activeQuestion.category} • {sport} • για{" "}
                   <span className="font-semibold">{currentTeamName}</span>
                 </div>
-                <h2 className="text-2xl font-bold mt-2">
-  ({activePoints * (x2Armed ? 2 : 1)} πόντοι)
-  {x2Armed ? <span className="ml-2 text-yellow-300">• x2 ενεργό</span> : null}
-  {" "}
-  {activeQuestion.question}
-</h2>
 
+                <h2 className="text-2xl font-bold mt-2">
+                  ({x2Active ? activePoints * 2 : activePoints} πόντοι{x2Active ? " x2" : ""}){" "}
+                  {activeQuestion.question}
+                </h2>
               </div>
 
               <button
@@ -616,21 +595,16 @@ return (
               </button>
 
               {activeQuestion.kind === "top5" ? (
-                <div className="text-sm text-gray-400">
-                  Σε Top5 δεν επιτρέπεται βοήθεια 50/50.
-                </div>
+                <div className="text-sm text-gray-400">Σε Top5 δεν επιτρέπεται βοήθεια 50/50.</div>
               ) : activeQuestion.category === "FiftyFifty" ? (
                 <div className="text-sm text-gray-400">
                   Σε αυτή την κατηγορία δεν επιτρέπεται βοήθεια 50/50.
                 </div>
               ) : (
-                <div className="text-sm text-gray-400">
-                  Αν είναι λάθος: 0 πόντοι και αλλάζει σειρά.
-                </div>
+                <div className="text-sm text-gray-400">Αν είναι λάθος: 0 πόντοι και αλλάζει σειρά.</div>
               )}
             </div>
 
-            {/* Hint options (μόνο για MCQ) */}
             {hintOptions && activeQuestion.kind !== "top5" && (
               <div className="mt-4 flex flex-wrap gap-2">
                 {hintOptions.map((i) => (
@@ -647,7 +621,6 @@ return (
               </div>
             )}
 
-            {/* Answer Area */}
             <div className="mt-6">
               {activeQuestion.kind === "top5" ? (
                 <>
@@ -677,29 +650,27 @@ return (
                   {top5AllowStop && !result && (
                     <div className="mb-4 p-4 rounded-xl border border-white/10 bg-white/5">
                       <div className="text-sm text-gray-200 mb-3">
-                        Θες να σταματήσεις και να πάρεις <b>{x2Armed ? 2 : 1} πόντους</b> ή συνεχίζεις για{" "}
-                        <b>{activePoints} πόντους</b>;
+                        Θες να σταματήσεις και να πάρεις <b>{x2Active ? 2 : 1} πόντους</b> ή
+                        συνεχίζεις για <b>{x2Active ? activePoints * 2 : activePoints} πόντους</b>;
                       </div>
                       <div className="flex gap-3">
                         <button
-                          onClick={top5StopAndTake1}
+                          onClick={top5StopAndTake}
                           className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 transition font-semibold"
                         >
-                          Stop ({x2Armed ? 2 : 1} πόντοι)
+                          Stop ({x2Active ? 2 : 1} πόντοι)
                         </button>
                         <button
                           onClick={top5Continue}
                           className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition font-semibold"
                         >
-                          Continue ({activePoints} πόντοι)
+                          Continue ({x2Active ? activePoints * 2 : activePoints} πόντοι)
                         </button>
                       </div>
                     </div>
                   )}
 
-                  <label className="block text-sm text-gray-300 mb-2">
-                    Γράψε μία απάντηση:
-                  </label>
+                  <label className="block text-sm text-gray-300 mb-2">Γράψε μία απάντηση:</label>
 
                   <input
                     value={userAnswer}
@@ -732,21 +703,14 @@ return (
 
                   {result && (
                     <div className="mt-4 p-4 rounded-xl border border-white/10 bg-white/5">
-                      <div className="text-2xl font-bold">
-                        {result.isCorrect ? "✅ Correct" : "❌ False"}
-                      </div>
-                      <div className="mt-2 text-gray-200 whitespace-pre-line">
-  {result.correct}
-</div>
-
+                      <div className="text-2xl font-bold">{result.isCorrect ? "✅ Correct" : "❌ False"}</div>
+                      <div className="mt-2 text-gray-200 whitespace-pre-line">{result.correct}</div>
                     </div>
                   )}
                 </>
               ) : (
                 <>
-                  <label className="block text-sm text-gray-300 mb-2">
-                    Γράψε την απάντηση:
-                  </label>
+                  <label className="block text-sm text-gray-300 mb-2">Γράψε την απάντηση:</label>
 
                   <input
                     value={userAnswer}
@@ -779,12 +743,9 @@ return (
 
                   {result && (
                     <div className="mt-4 p-4 rounded-xl border border-white/10 bg-white/5">
-                      <div className="text-2xl font-bold">
-                        {result.isCorrect ? "✅ Correct" : "❌ False"}
-                      </div>
+                      <div className="text-2xl font-bold">{result.isCorrect ? "✅ Correct" : "❌ False"}</div>
                       <div className="mt-2 text-gray-200">
-                        Σωστή απάντηση:{" "}
-                        <span className="font-semibold">{result.correct}</span>
+                        Σωστή απάντηση: <span className="font-semibold">{result.correct}</span>
                       </div>
                     </div>
                   )}
