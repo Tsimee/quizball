@@ -177,12 +177,9 @@ const [x2Armed, setX2Armed] = useState(false);
 
     setResult({ isCorrect: wonPoints > 0, correct: finalCorrectText });
     setQuestionsPlayed((n) => n + 1);
-    // ✅ Αν ήταν οπλισμένο x2 σε αυτό το γύρο, το καίμε (μία φορά ανά ομάδα)
-if (x2Armed && wonPoints > 0) {
-  if (turn === "A") setUsedX2A(true);
-  else setUsedX2B(true);
-}
-setX2Armed(false); // reset πάντα, αλλά "used" μόνο αν πήρε πόντους
+    // x2 reset πάντα μετά τον γύρο
+setX2Armed(false);
+
 
 
   }
@@ -242,10 +239,11 @@ setX2Armed(false); // reset πάντα, αλλά "used" μόνο αν πήρε �
     else setUsed5050B(true);
   }
 
-  function top5StopAndTake1() {
-    const mult = x2Armed ? 2 : 1;
-finalizeRound(1 * mult, "Σταμάτησες στο 4/5 και πήρες 1 πόντο.");
-  }
+function top5StopAndTake1() {
+  const mult = x2Armed ? 2 : 1;
+  finalizeRound(1 * mult, `Σταμάτησες στο 4/5 και πήρες ${1 * mult} πόντους.`);
+}
+
   function top5Continue() {
     setTop5AllowStop(false);
     setTop5Message(`Συνεχίζεις για τους ${activePoints} πόντους!`);
@@ -452,13 +450,15 @@ return (
             <span className="text-sm text-gray-400 flex items-center gap-2">
   (50/50: {used5050A ? "used" : "ready"} • x2: {usedX2A ? "used" : "ready"})
   <button
-    onClick={() => {
-      // μόνο στην σειρά της ομάδας Α
-      if (turn !== "A") return;
-      if (usedX2A) return;
-      // toggle
-      setX2Armed((v) => !v);
-    }}
+   onClick={() => {
+  if (turn !== "A") return;
+  if (usedX2A) return;
+  if (!!activeQuestion) return; // μόνο πριν ανοίξει ερώτηση
+
+  setX2Armed(true);   // οπλίζει για την επόμενη ερώτηση
+  setUsedX2A(true);   // ✅ ΚΑΙΓΕΤΑΙ ΑΜΕΣΩΣ
+}}
+
     disabled={turn !== "A" || usedX2A || !!activeQuestion} 
     className={[
       "px-2 py-1 rounded-lg border text-xs font-semibold transition",
@@ -482,10 +482,14 @@ return (
   (50/50: {used5050B ? "used" : "ready"} • x2: {usedX2B ? "used" : "ready"})
   <button
     onClick={() => {
-      if (turn !== "B") return;
-      if (usedX2B) return;
-      setX2Armed((v) => !v);
-    }}
+  if (turn !== "B") return;
+  if (usedX2B) return;
+  if (!!activeQuestion) return;
+
+  setX2Armed(true);
+  setUsedX2B(true);
+}}
+
     disabled={turn !== "B" || usedX2B || !!activeQuestion}
     className={[
       "px-2 py-1 rounded-lg border text-xs font-semibold transition",
@@ -579,8 +583,12 @@ return (
                   <span className="font-semibold">{currentTeamName}</span>
                 </div>
                 <h2 className="text-2xl font-bold mt-2">
-                  ({activePoints} πόντοι) {activeQuestion.question}
-                </h2>
+  ({activePoints * (x2Armed ? 2 : 1)} πόντοι)
+  {x2Armed ? <span className="ml-2 text-yellow-300">• x2 ενεργό</span> : null}
+  {" "}
+  {activeQuestion.question}
+</h2>
+
               </div>
 
               <button
@@ -669,7 +677,7 @@ return (
                   {top5AllowStop && !result && (
                     <div className="mb-4 p-4 rounded-xl border border-white/10 bg-white/5">
                       <div className="text-sm text-gray-200 mb-3">
-                        Θες να σταματήσεις και να πάρεις <b>1 πόντο</b> ή συνεχίζεις για{" "}
+                        Θες να σταματήσεις και να πάρεις <b>{x2Armed ? 2 : 1} πόντους</b> ή συνεχίζεις για{" "}
                         <b>{activePoints} πόντους</b>;
                       </div>
                       <div className="flex gap-3">
@@ -677,7 +685,7 @@ return (
                           onClick={top5StopAndTake1}
                           className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 transition font-semibold"
                         >
-                          Stop (1 πόντος)
+                          Stop ({x2Armed ? 2 : 1} πόντοι)
                         </button>
                         <button
                           onClick={top5Continue}
