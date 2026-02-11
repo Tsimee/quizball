@@ -107,6 +107,13 @@ export default function GameClient() {
 
   const [used5050A, setUsed5050A] = useState(false);
   const [used5050B, setUsed5050B] = useState(false);
+  // ✅ x2 power (μία φορά ανά ομάδα)
+const [usedX2A, setUsedX2A] = useState(false);
+const [usedX2B, setUsedX2B] = useState(false);
+
+// ✅ αν είναι ενεργό το x2 για το ΤΡΕΧΟΝ γύρο (μέχρι να απαντηθεί μια ερώτηση)
+const [x2Armed, setX2Armed] = useState(false);
+
 
   const [usedQuestionIds, setUsedQuestionIds] = useState<Set<string>>(() => new Set());
   const [usedCells, setUsedCells] = useState<Set<string>>(() => new Set());
@@ -136,8 +143,10 @@ export default function GameClient() {
     return `${category}-${points}-${idx}`;
   }
   function nextTurn() {
-    setTurn((t) => (t === "A" ? "B" : "A"));
-  }
+  setTurn((t) => (t === "A" ? "B" : "A"));
+  setX2Armed(false); // ✅ reset πάντα όταν αλλάζει σειρά
+}
+
   function award(points: number) {
     if (turn === "A") setScoreA((s) => s + points);
     else setScoreB((s) => s + points);
@@ -168,6 +177,14 @@ export default function GameClient() {
 
     setResult({ isCorrect: wonPoints > 0, correct: finalCorrectText });
     setQuestionsPlayed((n) => n + 1);
+    // ✅ Αν ήταν οπλισμένο x2 σε αυτό το γύρο, το καίμε (μία φορά ανά ομάδα)
+if (x2Armed && wonPoints > 0) {
+  if (turn === "A") setUsedX2A(true);
+  else setUsedX2B(true);
+}
+setX2Armed(false); // reset πάντα, αλλά "used" μόνο αν πήρε πόντους
+
+
   }
 
   function closeModal() {
@@ -182,6 +199,8 @@ export default function GameClient() {
     setTop5Strikes(0);
     setTop5Message(null);
     setTop5AllowStop(false);
+    setX2Armed(false);
+
   }
 
   function onPick(category: Category, points: 1 | 2 | 3, idx: number) {
@@ -200,6 +219,7 @@ export default function GameClient() {
       setTop5Strikes(0);
       setTop5Message(null);
       setTop5AllowStop(false);
+      setX2Armed(false);
     }
   }
 
@@ -223,7 +243,8 @@ export default function GameClient() {
   }
 
   function top5StopAndTake1() {
-    finalizeRound(1, "Σταμάτησες στο 4/5 και πήρες 1 πόντο.");
+    const mult = x2Armed ? 2 : 1;
+finalizeRound(1 * mult, "Σταμάτησες στο 4/5 και πήρες 1 πόντο.");
   }
   function top5Continue() {
     setTop5AllowStop(false);
@@ -247,17 +268,23 @@ export default function GameClient() {
       });
 
       if (matchPos !== -1) {
-        const nextFound = [...top5Found];
-        nextFound[matchPos] = true;
-        setTop5Found(nextFound);
-        const foundCount = nextFound.filter(Boolean).length;
-        setTop5Message(`✅ Σωστό! (${foundCount}/5)`);
-        setUserAnswer("");
+  const nextFound = [...top5Found];
+  nextFound[matchPos] = true;
+  setTop5Found(nextFound);
 
-        if (foundCount === 5) return finalizeRound(activePoints, "Βρήκες και τις 5!");
-        if (foundCount >= 4 && top5Strikes < 2) setTop5AllowStop(true);
-        return;
-      }
+  const foundCount = nextFound.filter(Boolean).length;
+  setTop5Message(`✅ Σωστό! (${foundCount}/5)`);
+  setUserAnswer("");
+
+  // ✅ ΜΟΝΟ αν βρήκε και τις 5 τελειώνει
+  if (foundCount === 5) {
+    const mult = x2Armed ? 2 : 1;
+    return finalizeRound(activePoints * mult, "Βρήκες και τις 5!");
+  }
+
+  if (foundCount >= 4 && top5Strikes < 2) setTop5AllowStop(true);
+  return;
+}
 
       const nextStrikes = top5Strikes + 1;
       setTop5Strikes(nextStrikes);
@@ -272,7 +299,9 @@ export default function GameClient() {
     const correctText = activeQuestion.answers![activeQuestion.correctIndex!];
     const accepted = [correctText, ...(activeQuestion.acceptedAnswers ?? [])];
     const isCorrect = accepted.some((a) => answersMatch(userAnswer, a));
-    finalizeRound(isCorrect ? activePoints : 0, correctText);
+    const base = isCorrect ? activePoints : 0;
+const mult = base > 0 && x2Armed ? 2 : 1;
+finalizeRound(base * mult, correctText);
   }
 
   function continueAfterResult() {
@@ -420,17 +449,57 @@ return (
           <div>
             <span className="text-gray-300">{teamA}:</span>{" "}
             <span className="font-bold">{scoreA}</span>{" "}
-            <span className="text-sm text-gray-400">
-              (50/50: {used5050A ? "used" : "ready"})
-            </span>
+            <span className="text-sm text-gray-400 flex items-center gap-2">
+  (50/50: {used5050A ? "used" : "ready"} • x2: {usedX2A ? "used" : "ready"})
+  <button
+    onClick={() => {
+      // μόνο στην σειρά της ομάδας Α
+      if (turn !== "A") return;
+      if (usedX2A) return;
+      // toggle
+      setX2Armed((v) => !v);
+    }}
+    disabled={turn !== "A" || usedX2A || !!activeQuestion} 
+    className={[
+      "px-2 py-1 rounded-lg border text-xs font-semibold transition",
+      x2Armed && turn === "A"
+        ? "bg-yellow-500/20 border-yellow-400/40"
+        : "bg-white/5 border-white/10 hover:bg-white/10",
+      (turn !== "A" || usedX2A || !!activeQuestion) ? "opacity-40 cursor-not-allowed" : ""
+    ].join(" ")}
+    title="Χρησιμοποίησε x2 πριν διαλέξεις ερώτηση"
+  >
+    x2
+  </button>
+</span>
+
           </div>
 
           <div>
             <span className="text-gray-300">{teamB}:</span>{" "}
             <span className="font-bold">{scoreB}</span>{" "}
-            <span className="text-sm text-gray-400">
-              (50/50: {used5050B ? "used" : "ready"})
-            </span>
+            <span className="text-sm text-gray-400 flex items-center gap-2">
+  (50/50: {used5050B ? "used" : "ready"} • x2: {usedX2B ? "used" : "ready"})
+  <button
+    onClick={() => {
+      if (turn !== "B") return;
+      if (usedX2B) return;
+      setX2Armed((v) => !v);
+    }}
+    disabled={turn !== "B" || usedX2B || !!activeQuestion}
+    className={[
+      "px-2 py-1 rounded-lg border text-xs font-semibold transition",
+      x2Armed && turn === "B"
+        ? "bg-yellow-500/20 border-yellow-400/40"
+        : "bg-white/5 border-white/10 hover:bg-white/10",
+      (turn !== "B" || usedX2B || !!activeQuestion) ? "opacity-40 cursor-not-allowed" : ""
+    ].join(" ")}
+    title="Χρησιμοποίησε x2 πριν διαλέξεις ερώτηση"
+  >
+    x2
+  </button>
+</span>
+
           </div>
 
           <div>
