@@ -112,13 +112,13 @@ export default function GameClient() {
   const [usedX2B, setUsedX2B] = useState(false);
 
   const [x2Armed, setX2Armed] = useState(false);
-  const [x2Active, setX2Active] = useState(false);
+  const [x2UsedOnQuestion, setX2UsedOnQuestion] = useState(false);
 
   const [usedQuestionIds, setUsedQuestionIds] = useState<Set<string>>(() => new Set());
   const [usedCells, setUsedCells] = useState<Set<string>>(() => new Set());
 
   const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
-  const [activePoints, setActivePoints] = useState<1 | 2 | 3>(1);
+  const [pickedCellPoints, setPickedCellPoints] = useState<1 | 2 | 3>(1);
 
   const [userAnswer, setUserAnswer] = useState("");
   const [result, setResult] = useState<null | { isCorrect: boolean; correct: string }>(null);
@@ -145,7 +145,7 @@ export default function GameClient() {
   function nextTurn() {
     setTurn((t) => (t === "A" ? "B" : "A"));
     setX2Armed(false);
-    setX2Active(false);
+    setX2UsedOnQuestion(false);
   }
 
   function award(points: number) {
@@ -179,8 +179,10 @@ export default function GameClient() {
     setResult({ isCorrect: wonPoints > 0, correct: finalCorrectText });
     setQuestionsPlayed((n) => n + 1);
 
+    // καθάρισμα helpers/state για να μην "μένουν"
+    setHintOptions(null);
     setX2Armed(false);
-    setX2Active(false);
+    setX2UsedOnQuestion(false);
   }
 
   function closeModal() {
@@ -188,7 +190,7 @@ export default function GameClient() {
     setUserAnswer("");
     setResult(null);
     setHintOptions(null);
-    setActivePoints(1);
+    setPickedCellPoints(1);
     setActiveCell(null);
 
     setTop5Found([false, false, false, false, false]);
@@ -197,27 +199,29 @@ export default function GameClient() {
     setTop5AllowStop(false);
 
     setX2Armed(false);
-    setX2Active(false);
+    setX2UsedOnQuestion(false);
   }
 
   function onPick(category: Category, points: 1 | 2 | 3, idx: number) {
+    if (activeQuestion) return; // extra guard (διπλά clicks)
+
     const q = pickQuestion(sport, category, points, usedQuestionIds);
     if (!q) return alert("Δεν υπάρχουν άλλες ερωτήσεις γι' αυτή την επιλογή ακόμα.");
 
     setActiveQuestion(q);
-    setActivePoints(points);
+    setPickedCellPoints(points);
     setUserAnswer("");
     setResult(null);
     setHintOptions(null);
     setActiveCell({ category, points, idx });
 
     if (x2Armed) {
-      setX2Active(true);
+      setX2UsedOnQuestion(true);
       if (turn === "A") setUsedX2A(true);
       else setUsedX2B(true);
       setX2Armed(false);
     } else {
-      setX2Active(false);
+      setX2UsedOnQuestion(false);
     }
 
     if (q.kind === "top5") {
@@ -235,8 +239,6 @@ export default function GameClient() {
     if (turn === "A" && used5050A) return;
     if (turn === "B" && used5050B) return;
 
-    setActivePoints(1);
-
     const correct = activeQuestion.correctIndex!;
     const all = [0, 1, 2, 3];
     const wrongOptions = all.filter((i) => i !== correct);
@@ -248,19 +250,18 @@ export default function GameClient() {
   }
 
   function top5StopAndTake() {
-    finalizeRound(x2Active ? 2 : 1, `Σταμάτησες στο 4/5 και πήρες ${x2Active ? 2 : 1} πόντους.`);
+    finalizeRound(x2UsedOnQuestion ? 2 : 1, `Σταμάτησες στο 4/5 και πήρες ${x2UsedOnQuestion ? 2 : 1} πόντους.`);
   }
 
   function top5Continue() {
     setTop5AllowStop(false);
-    setTop5Message(
-      `Συνεχίζεις για τους ${x2Active ? activePoints * 2 : activePoints} πόντους!`
-    );
+    setTop5Message(`Συνεχίζεις για τους ${x2UsedOnQuestion ? pickedCellPoints * 2 : pickedCellPoints} πόντους!`);
   }
 
   function submitAnswer() {
     if (!activeQuestion || result) return;
 
+    // TOP5: ίδιος κανόνας όπως πριν (χωρίς 50/50)
     if (activeQuestion.kind === "top5") {
       const guess = userAnswer.trim();
       if (!guess) return;
@@ -284,7 +285,7 @@ export default function GameClient() {
         setUserAnswer("");
 
         if (foundCount === 5) {
-          return finalizeRound(x2Active ? activePoints * 2 : activePoints, "Βρήκες και τις 5!");
+          return finalizeRound(x2UsedOnQuestion ? pickedCellPoints * 2 : pickedCellPoints, "Βρήκες και τις 5!");
         }
 
         if (foundCount >= 4 && top5Strikes < 2) setTop5AllowStop(true);
@@ -301,18 +302,32 @@ export default function GameClient() {
       return;
     }
 
+    // NORMAL Q
     const correctText = activeQuestion.answers![activeQuestion.correctIndex!];
     const accepted = [correctText, ...(activeQuestion.acceptedAnswers ?? [])];
     const isCorrect = accepted.some((a) => answersMatch(userAnswer, a));
-    const base = isCorrect ? activePoints : 0;
-    const mult = base > 0 && x2Active ? 2 : 1;
-    finalizeRound(base * mult, correctText);
+
+    if (!isCorrect) return finalizeRound(0, correctText);
+
+    const used5050ThisQuestion = !!hintOptions;
+
+    // Κανόνας πόντων (εκτός Top5)
+    // - χωρίς 50/50: x2 διπλασιάζει
+    // - με 50/50: ακυρώνει x2 και δίνει min(points,2)
+    let pointsWon = 0;
+    if (used5050ThisQuestion) {
+      pointsWon = Math.min(pickedCellPoints, 2); // x1->1, x2->2, x3->2
+    } else {
+      pointsWon = pickedCellPoints * (x2UsedOnQuestion ? 2 : 1); // 1->2, 2->4, 3->6
+    }
+
+    finalizeRound(pointsWon, correctText);
   }
 
   function continueAfterResult() {
     if (!result) return;
-    closeModal();
-    nextTurn();
+    nextTurn();   // ΠΑΝΤΑ αλλάζει σειρά
+    closeModal(); // μετά κλείνει modal
   }
 
   function setSideA(side: "heads" | "tails") {
@@ -335,6 +350,7 @@ export default function GameClient() {
     setPhase("game");
   }
 
+  // COIN SCREEN
   if (phase === "coin") {
     const teamBSide: "heads" | "tails" | null = teamASide
       ? teamASide === "heads"
@@ -405,7 +421,8 @@ export default function GameClient() {
                 <span className="font-semibold">{flipResult === "heads" ? "Heads" : "Tails"}</span>
               </div>
               <div>
-                🏆 Νικητής: <span className="font-semibold">{flipWinner === "A" ? teamA : teamB}</span>
+                🏆 Νικητής:{" "}
+                <span className="font-semibold">{flipWinner === "A" ? teamA : teamB}</span>
               </div>
             </div>
           )}
@@ -430,6 +447,20 @@ export default function GameClient() {
       </main>
     );
   }
+
+  // GAME SCREEN CALCS
+  const isTop5 = activeQuestion?.kind === "top5";
+  const used5050ThisQuestion = !!hintOptions && !isTop5;
+
+  const x2EffectiveActive = x2UsedOnQuestion && !used5050ThisQuestion;
+
+  const modalPoints = !activeQuestion
+    ? 0
+    : isTop5
+    ? pickedCellPoints * (x2UsedOnQuestion ? 2 : 1)
+    : used5050ThisQuestion
+    ? Math.min(pickedCellPoints, 2)
+    : pickedCellPoints * (x2UsedOnQuestion ? 2 : 1);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-black via-zinc-900 to-black text-white p-6">
@@ -506,7 +537,6 @@ export default function GameClient() {
 
       <div className="mt-8 grid grid-cols-4 gap-4">
         <div className="col-span-1 text-gray-300 font-semibold">Κατηγορίες</div>
-
         <div />
         <div />
         <div />
@@ -565,15 +595,25 @@ export default function GameClient() {
                 </div>
 
                 <h2 className="text-2xl font-bold mt-2">
-                  ({x2Active ? activePoints * 2 : activePoints} πόντοι{x2Active ? " x2" : ""}){" "}
+                  ({modalPoints} πόντοι)
+                  {x2EffectiveActive ? (
+                    <span className="ml-3 inline-flex items-center px-2 py-1 rounded-lg text-xs font-semibold bg-yellow-500/20 border border-yellow-400/40">
+                      x2 ενεργό
+                    </span>
+                  ) : null}{" "}
                   {activeQuestion.question}
                 </h2>
               </div>
 
+              {/* ΚΛΕΙΔΩΝΕΙ μέχρι να βγει αποτέλεσμα */}
               <button
                 onClick={closeModal}
-                className="px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20"
-                title="Κλείσιμο"
+                disabled={!result}
+                className={[
+                  "px-3 py-2 rounded-lg",
+                  result ? "bg-white/10 hover:bg-white/20" : "bg-white/5 opacity-40 cursor-not-allowed",
+                ].join(" ")}
+                title={result ? "Κλείσιμο" : "Απάντα πρώτα και πάτα Continue"}
               >
                 ✕
               </button>
@@ -581,25 +621,24 @@ export default function GameClient() {
 
             <div className="mt-4 flex items-center gap-3">
               <button
-                onClick={use5050}
-                disabled={
-                  activeQuestion.kind === "top5" ||
-                  activeQuestion.category === "FiftyFifty" ||
-                  (turn === "A" && used5050A) ||
-                  (turn === "B" && used5050B) ||
-                  !!result
-                }
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 transition font-semibold"
-              >
-                50/50 (κάνει 1 πόντο)
-              </button>
+  onClick={use5050}
+  disabled={
+    activeQuestion.kind === "top5" ||
+    activeQuestion.category === "FiftyFifty" ||
+    (turn === "A" && used5050A) ||
+    (turn === "B" && used5050B) ||
+    !!result
+  }
+  className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:hover:bg-blue-600 transition font-semibold"
+>
+  50/50
+</button>
+
 
               {activeQuestion.kind === "top5" ? (
                 <div className="text-sm text-gray-400">Σε Top5 δεν επιτρέπεται βοήθεια 50/50.</div>
               ) : activeQuestion.category === "FiftyFifty" ? (
-                <div className="text-sm text-gray-400">
-                  Σε αυτή την κατηγορία δεν επιτρέπεται βοήθεια 50/50.
-                </div>
+                <div className="text-sm text-gray-400">Σε αυτή την κατηγορία δεν επιτρέπεται βοήθεια 50/50.</div>
               ) : (
                 <div className="text-sm text-gray-400">Αν είναι λάθος: 0 πόντοι και αλλάζει σειρά.</div>
               )}
@@ -624,9 +663,7 @@ export default function GameClient() {
             <div className="mt-6">
               {activeQuestion.kind === "top5" ? (
                 <>
-                  <div className="text-sm text-gray-300 mb-2">
-                    Δώσε 5 απαντήσεις. Έχεις 2 λάθη max.
-                  </div>
+                  <div className="text-sm text-gray-300 mb-2">Δώσε 5 απαντήσεις. Έχεις 2 λάθη max.</div>
 
                   <div className="grid grid-cols-1 gap-2 mb-4">
                     {(activeQuestion.top5 ?? Array(5).fill("")).map((_, i) => (
@@ -650,21 +687,22 @@ export default function GameClient() {
                   {top5AllowStop && !result && (
                     <div className="mb-4 p-4 rounded-xl border border-white/10 bg-white/5">
                       <div className="text-sm text-gray-200 mb-3">
-                        Θες να σταματήσεις και να πάρεις <b>{x2Active ? 2 : 1} πόντους</b> ή
-                        συνεχίζεις για <b>{x2Active ? activePoints * 2 : activePoints} πόντους</b>;
+                        Θες να σταματήσεις και να πάρεις <b>{x2UsedOnQuestion ? 2 : 1} πόντους</b> ή
+                        συνεχίζεις για{" "}
+                        <b>{x2UsedOnQuestion ? pickedCellPoints * 2 : pickedCellPoints} πόντους</b>;
                       </div>
                       <div className="flex gap-3">
                         <button
                           onClick={top5StopAndTake}
                           className="px-4 py-2 rounded-xl bg-green-600 hover:bg-green-700 transition font-semibold"
                         >
-                          Stop ({x2Active ? 2 : 1} πόντοι)
+                          Stop ({x2UsedOnQuestion ? 2 : 1} πόντοι)
                         </button>
                         <button
                           onClick={top5Continue}
                           className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 transition font-semibold"
                         >
-                          Continue ({x2Active ? activePoints * 2 : activePoints} πόντοι)
+                          Continue ({x2UsedOnQuestion ? pickedCellPoints * 2 : pickedCellPoints} πόντοι)
                         </button>
                       </div>
                     </div>
